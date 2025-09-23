@@ -1,24 +1,30 @@
-# Logs
-logs
+# Node / Vite / Electron
+node_modules/
+dist/
+out/
+build/
+release/
+.vite/
+*.tsbuildinfo
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Runtime SQLite (App-Daten)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
-# Editor directories and files
+# Exporte (optional, wenn du im Projektordner speicherst)
+exports/
+*.csv
+*.pdf
+
+# Env/Secrets
+.env
+.env.*
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.idea/
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
