@@ -1,0 +1,38 @@
+:root {
+  --gap: 12px;
+  --radius: 10px;
+  --border: 1px solid rgba(0,0,0,.1);
+}
+
+body { font-family: system-ui, Segoe UI, Roboto, sans-serif; margin: 0; }
+.n4-page { max-width: 1100px; margin: 0 auto; padding: 12px 16px 40px; }
+
+.n4-panel { margin-top: 14px; }
+.n4-form label, .n4-row label { font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.n4-row { display: flex; gap: var(--gap); align-items: end; flex-wrap: wrap; }
+.n4-block { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+
+input, select, textarea {
+  border: var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 14px;
+}
+button {
+  border: var(--border);
+  border-radius: 20px;
+  padding: 8px 14px;
+  background: #fff;
+  cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: default; }
+.n4-error { color: #b10028; }
+
+.n4-table-wrap { border: var(--border); border-radius: var(--radius); overflow: auto; }
+.n4-table { width: 100%; border-collapse: collapse; }
+.n4-table th, .n4-table td { padding: 8px 10px; border-bottom: 1px solid rgba(0,0,0,.06); text-align: left; }
+
+.n4-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1000px) { .n4-grid { grid-template-columns: 1fr; } }
+
+.n4-card { padding: 12px; border: var(--border); border-radius: var(--radius); }
