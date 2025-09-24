@@ -7,8 +7,8 @@ export default function AppHeader() {
         className="n4-logo"
         src="/notizia_logo.png"
         alt="Notizia Logo"
-        width={56}
-        height={56}
+        width={150}
+        height={150}
         draggable={false}
       />
       <h1 className="n4-title">Heilerfolge sichtbar machen</h1>

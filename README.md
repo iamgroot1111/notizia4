@@ -1,69 +1,55 @@
-# React + TypeScript + Vite
+# Notizia – Heilerfolge sichtbar machen
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Offline‑fähige Desktop‑App (Electron + React + SQLite) zur **einheitlichen Dokumentation** von
+Klienten‑ und Therapiesitzungen mit **Grundauswertungen** und vorbereitetem **Export**.
+Die App speichert alle Daten lokal und funktioniert ohne Internet. :contentReference[oaicite:2]{index=2}
 
-Currently, two official plugins are available:
+> UI‑Leitidee & Navigation orientieren sich an den Mockups („Klienten“, „Sitzungen“, Auswertungen). :contentReference[oaicite:3]{index=3}
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## Expanding the ESLint configuration
+## ✨ Funktionsumfang (aktueller Stand)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **Klientenverwaltung (CRUD)**: Anlegen, Suchen/Filtern, Bearbeiten, Löschen. Pflichtfelder:
+  `full_name`, `gender (m|w|d|u)`.  
+  (*w* = weiblich, *m* = männlich, *d* = divers, *u* = unbekannt)
+- **Anamnese pro Fall (Case)** – im Detailbereich eines Klienten:
+  - Methode, primäres Problem, Ziel (Text)
+  - **Alter (Start)** als `age_years_at_start`
+  - **SUD**: Start/aktuell
+  - **Seit wann** belastend (`problem_since_month`), **Dauer** in Monaten
+  - **Bisherige Therapien** (Typ, *seit wann*, *Dauer*, *abgeschlossen*, Notiz)
+  - **Medikamente** (Code, *seit wann*, Dosierung/Notiz)
+  - Speichern / Bearbeiten / Löschen der Anamnese
+- **Sitzungen (CRUD)** pro Fall:
+  - Datum, Thema, SUD (Sitzung), Dauer (Min.)
+  - **Methoden‑Override für die Sitzung**, **Veränderungen seit letzter Sitzung**,
+    **neues Problem** (Code) sowie optionale Notiz
+  - Tabellarische Anzeige mit Inline‑Bearbeitung
+- **Lokale Speicherung** in SQLite, robust via Migrationen (siehe unten)  
+- **Grundlegende Filter/Suche** (Name/Teile des Namens)
+- **Vorbereitung Export & interne Auswertungen** (folgt als nächster Schritt). :contentReference[oaicite:4]{index=4}
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+---
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## 🧩 Tech‑Stack
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- **Frontend**: React + TypeScript + Vite
+- **Desktop**: Electron (Context Isolation + Preload‑Bridge)
+- **Datenbank**: SQLite (via `better-sqlite3`, WAL‑Modus)
+- **Typsichere IPC‑Bridge**: Deklarationen in `src/types/window.d.ts`
+- **Migrations**: SQL‑Dateien unter `sql/personal` (automatisch ausgeführt)
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 🚀 Schnellstart (Entwicklung)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### Voraussetzungen
+- Node.js ≥ 20 (empfohlen; getestet mit Node 22)
+- Windows 10/11 (andere OS prinzipiell möglich)
+- Optional: *DB Browser for SQLite* zum Nachsehen (nicht parallel offen lassen)
+
+### Setup & Start
+```bash
+npm install
+npm run dev
