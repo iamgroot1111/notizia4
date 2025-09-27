@@ -82,6 +82,44 @@ declare global {
 
   interface Window {
     api: {
+      auth: {
+        me(): Promise<{
+          username: string;
+          role: string;
+          must_change_pw?: boolean;
+        } | null>;
+        login(p: {
+          username: string;
+          password: string;
+        }): Promise<{ username: string; role: string }>;
+        logout(): Promise<{ ok: true }>;
+        changePassword(p: {
+          currentPassword: string;
+          newPassword: string;
+        }): Promise<{ ok: true }>;
+        users: {
+          list(): Promise<
+            Array<{
+              id: number;
+              username: string;
+              role: string;
+              created_at: string;
+              must_change_pw?: number;
+            }>
+          >;
+          create(p: {
+            username: string;
+            role?: "therapist" | "admin";
+            password?: string;
+          }): Promise<{ id: number; tempPassword?: string }>;
+        };
+      };
+      export: {
+        study: {
+          refresh(): Promise<{ ok: true }>;
+          toCsv(): Promise<{ path: string }>;
+        };
+      };
       clients: {
         list(): Promise<Client[]>;
         create(p: {
@@ -180,6 +218,7 @@ declare global {
       };
       maintenance: {
         recalcProblemDurations(): Promise<{ updated: number }>;
+        rebuildViews(): Promise<{ ok: true }>;
       };
     };
   }
@@ -190,7 +229,7 @@ export type ReportMethodProblemRow = {
   method_label: string;
   problem_code: string;
   problem_label: string;
-  status: 'current' | 'closed';
+  status: "current" | "closed";
   cases_n: number;
   avg_sessions: number | null;
   avg_sud_start: number | null;

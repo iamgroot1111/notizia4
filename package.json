@@ -10,9 +10,12 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "rebuild": "electron-rebuild -f"
+    "rebuild": "electron-rebuild -f",
+    "postinstall": "electron-rebuild -f -w better-sqlite3",
+    "rebuild-native": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.2",
     "better-sqlite3": "^12.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
@@ -20,11 +23,12 @@
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",
     "@eslint/js": "^9.36.0",
-    "@types/react": "^19.1.13",
+    "@types/react": "^19.1.14",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.3",
     "concurrently": "^9.2.1",
     "electron": "^38.1.2",
+    "electron-rebuild": "^3.2.9",
     "eslint": "^9.36.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",

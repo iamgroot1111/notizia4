@@ -4,6 +4,9 @@ const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const Database = require("better-sqlite3");
+const bcrypt = require("bcryptjs");
+
+const sessions = new Map(); // windowId -> { userId, username, role }
 
 let win;
 let dbPersonal;
@@ -39,18 +42,12 @@ function runMigrations(db, dir) {
     );
   `);
 
-  const files = fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".sql")).sort();
   const seen = db.prepare("SELECT 1 FROM _migrations WHERE filename=?");
   const mark = db.prepare("INSERT INTO _migrations(filename) VALUES (?)");
 
   for (const file of files) {
-    if (seen.get(file)) {
-      console.log("[migration] skip", file);
-      continue;
-    }
+    if (seen.get(file)) { console.log("[migration] skip", file); continue; }
     const sql = fs.readFileSync(path.join(dir, file), "utf8");
     db.exec("BEGIN");
     try {
@@ -66,11 +63,59 @@ function runMigrations(db, dir) {
   }
 }
 
+/** Seed-Admin zur Laufzeit: ohne Hash im Repo */
+/** Seed-Admin zur Laufzeit: Insert oder (optional) Reset via ENV */
+function ensureAdmin() {
+  const row = dbPersonal.prepare(
+    "SELECT id, username FROM users WHERE username=?"
+  ).get("admin");
+
+  const initPw     = process.env.INIT_ADMIN_PASSWORD || "admin"; // Default
+  const overwrite  = process.env.INIT_ADMIN_OVERWRITE === "1";   // Reset erzwingen?
+  const hash       = bcrypt.hashSync(initPw, 12);
+
+  const hasMustChangePw = dbPersonal
+    .prepare("PRAGMA table_info('users')")
+    .all()
+    .some(c => c.name === "must_change_pw");
+
+  if (!row) {
+    // --- Admin anlegen
+    if (hasMustChangePw) {
+      dbPersonal.prepare(`
+        INSERT INTO users (username, password_hash, role, must_change_pw)
+        VALUES (@u, @h, 'admin', 1)
+      `).run({ u: "admin", h: hash });
+    } else {
+      dbPersonal.prepare(`
+        INSERT INTO users (username, password_hash, role)
+        VALUES (@u, @h, 'admin')
+      `).run({ u: "admin", h: hash });
+    }
+    console.log("Default-Admin angelegt (Bitte Passwort ändern).");
+  } else if (overwrite) {
+    // --- Admin zurücksetzen (PW neu setzen + must_change_pw=1)
+    if (hasMustChangePw) {
+      dbPersonal.prepare(`
+        UPDATE users SET password_hash=@h, must_change_pw=1 WHERE username='admin'
+      `).run({ h: hash });
+    } else {
+      dbPersonal.prepare(`
+        UPDATE users SET password_hash=@h WHERE username='admin'
+      `).run({ h: hash });
+    }
+    console.log("Admin-Passwort via INIT_ADMIN_OVERWRITE=1 zurückgesetzt.");
+  } else {
+    // nichts tun (admin existiert, kein Reset gewünscht)
+  }
+}
+
+
 /** idempotent: Spalte hinzufügen */
 function addColumnIfMissing(db, table, columnDef) {
   const col = String(columnDef).trim().split(/\s+/, 1)[0];
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (!cols.some((c) => c.name === col)) {
+  if (!cols.some(c => c.name === col)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
     console.log(`[ddl] add ${table}.${col}`);
   }
@@ -79,22 +124,15 @@ function addColumnIfMissing(db, table, columnDef) {
 /** Utils */
 function monthsBetweenYM(sinceYYYYMM, refISO) {
   if (!sinceYYYYMM) return null;
-  const [sy, sm] = String(sinceYYYYMM)
-    .split("-")
-    .map((n) => parseInt(n, 10));
+  const [sy, sm] = String(sinceYYYYMM).split("-").map(n => parseInt(n, 10));
   if (!sy || !sm) return null;
   const ref = refISO ? new Date(refISO) : new Date();
   const diff = (ref.getFullYear() - sy) * 12 + (ref.getMonth() + 1 - sm);
   return Math.max(0, diff);
 }
-function toMonth(iso) {
-  return iso ? String(iso).slice(0, 7) : null;
-}
+function toMonth(iso) { return iso ? String(iso).slice(0, 7) : null; }
 function uidForCase(caseId) {
-  return crypto
-    .createHash("sha1")
-    .update("notizia|case|" + caseId)
-    .digest("hex");
+  return crypto.createHash("sha1").update("notizia|case|" + caseId).digest("hex");
 }
 
 /* ========== Reporting-SQL (ohne Views) ========== */
@@ -185,7 +223,7 @@ app.whenReady().then(() => {
   const base = app.getPath("userData"); // z. B. %APPDATA%/notizia4
 
   dbPersonal = new Database(path.join(base, "personal.sqlite"));
-  dbStudy = new Database(path.join(base, "study.sqlite"));
+  dbStudy    = new Database(path.join(base, "study.sqlite"));
   dbPersonal.pragma("journal_mode = WAL");
   dbStudy.pragma("journal_mode = WAL");
 
@@ -197,9 +235,12 @@ app.whenReady().then(() => {
   addColumnIfMissing(dbPersonal, "cases", "age_years_at_start INTEGER");
   addColumnIfMissing(dbPersonal, "cases", "closed_at TEXT");
 
-  // Migrationen (legt auch Views wie v_method_problem_stats an)
+  // Migrationen (legt u.a. users/must_change_pw, Views etc. an)
   runMigrations(dbPersonal, path.join(__dirname, "../sql/personal"));
-  runMigrations(dbStudy, path.join(__dirname, "../sql/study"));
+  runMigrations(dbStudy,    path.join(__dirname, "../sql/study"));
+
+  // Default-Admin anlegen (wenn nicht vorhanden)
+  ensureAdmin();
 
   /* ---------- Helper zum Befüllen der Study-DB ---------- */
   function refreshStudyAgg() {
@@ -231,121 +272,61 @@ app.whenReady().then(() => {
               @prev_therapies_share, @prev_therapies_avg_months,
               @genders_m, @genders_w, @genders_d, @genders_u)
     `);
-    const tx = dbStudy.transaction((items) => {
-      for (const r of items) ins.run(r);
-    });
+    const tx = dbStudy.transaction((items) => { for (const r of items) ins.run(r); });
     tx(rows);
     return { inserted: rows.length };
   }
 
   /* ========== IPC: CLIENTS ========== */
   ipcMain.handle("clients.list", () => {
-    return dbPersonal
-      .prepare(
-        `
+    return dbPersonal.prepare(`
       SELECT id, full_name, gender, dob
       FROM clients
       ORDER BY full_name COLLATE NOCASE
-    `
-      )
-      .all();
+    `).all();
   });
 
   ipcMain.handle("clients.create", (_e, payload = {}) => {
-    const {
-      full_name,
-      gender,
-      dob = null,
-      contact = null,
-      intake = null,
-    } = payload;
-    if (!full_name || !String(full_name).trim())
-      throw new Error("full_name ist Pflichtfeld.");
-    if (!gender || !["m", "w", "d", "u"].includes(String(gender)))
-      throw new Error("gender (m|w|d|u) ist Pflicht.");
+    const { full_name, gender, dob = null, contact = null, intake = null } = payload;
+    if (!full_name || !String(full_name).trim()) throw new Error("full_name ist Pflichtfeld.");
+    if (!gender || !["m", "w", "d", "u"].includes(String(gender))) throw new Error("gender (m|w|d|u) ist Pflicht.");
 
-    const info = dbPersonal
-      .prepare(
-        `
+    const info = dbPersonal.prepare(`
       INSERT INTO clients(full_name, gender, dob, contact) VALUES (?, ?, ?, ?)
-    `
-      )
-      .run(String(full_name).trim(), gender, dob, contact);
+    `).run(String(full_name).trim(), gender, dob, contact);
     const clientId = Number(info.lastInsertRowid);
 
-    // optional: ersten Fall direkt anlegen
-    if (
-      intake &&
-      (intake.age_years_at_start != null ||
-        intake.method_code ||
-        intake.primary_problem_code)
-    ) {
+    if (intake && (intake.age_years_at_start != null || intake.method_code || intake.primary_problem_code)) {
       const method_code = intake.method_code || "AUFLOESENDE_HYPNOSE";
       const primary_problem_code = intake.primary_problem_code || "UNSPEC";
       const start_date = new Date().toISOString().slice(0, 10);
-      dbPersonal
-        .prepare(
-          `
+      dbPersonal.prepare(`
         INSERT INTO cases(client_id, method_code, primary_problem_code, start_date, age_years_at_start)
         VALUES (?, ?, ?, ?, ?)
-      `
-        )
-        .run(
-          clientId,
-          method_code,
-          primary_problem_code,
-          start_date,
-          intake.age_years_at_start ?? null
-        );
+      `).run(clientId, method_code, primary_problem_code, start_date, intake.age_years_at_start ?? null);
     }
     return { id: clientId };
   });
 
   ipcMain.handle("clients.update", (_e, p = {}) => {
-    const {
-      id,
-      full_name = null,
-      gender = null,
-      dob = undefined,
-      contact = undefined,
-    } = p;
+    const { id, full_name = null, gender = null, dob = undefined, contact = undefined } = p;
     if (!id) throw new Error("id fehlt.");
-    dbPersonal
-      .prepare(
-        `
+    dbPersonal.prepare(`
       UPDATE clients
          SET full_name = COALESCE(@full_name, full_name),
              gender    = COALESCE(@gender, gender),
              dob       = CASE WHEN @dob     IS NULL THEN dob     ELSE @dob     END,
              contact   = CASE WHEN @contact IS NULL THEN contact ELSE @contact END
        WHERE id=@id
-    `
-      )
-      .run({ id, full_name, gender, dob, contact });
+    `).run({ id, full_name, gender, dob, contact });
     return { ok: true };
   });
 
   ipcMain.handle("clients.delete", (_e, id) => {
-    dbPersonal
-      .prepare(
-        `DELETE FROM session_notes WHERE session_id IN (SELECT id FROM sessions WHERE case_id IN (SELECT id FROM cases WHERE client_id=?))`
-      )
-      .run(id);
-    dbPersonal
-      .prepare(
-        `DELETE FROM sessions WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`
-      )
-      .run(id);
-    dbPersonal
-      .prepare(
-        `DELETE FROM case_previous_therapies WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`
-      )
-      .run(id);
-    dbPersonal
-      .prepare(
-        `DELETE FROM case_medications     WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`
-      )
-      .run(id);
+    dbPersonal.prepare(`DELETE FROM session_notes WHERE session_id IN (SELECT id FROM sessions WHERE case_id IN (SELECT id FROM cases WHERE client_id=?))`).run(id);
+    dbPersonal.prepare(`DELETE FROM sessions WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`).run(id);
+    dbPersonal.prepare(`DELETE FROM case_previous_therapies WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`).run(id);
+    dbPersonal.prepare(`DELETE FROM case_medications     WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`).run(id);
     dbPersonal.prepare(`DELETE FROM cases WHERE client_id=?`).run(id);
     dbPersonal.prepare(`DELETE FROM clients WHERE id=?`).run(id);
     return { ok: true };
@@ -353,67 +334,41 @@ app.whenReady().then(() => {
 
   /* ========== IPC: CASES ========== */
   ipcMain.handle("cases.listByClient", (_e, clientId) => {
-    return dbPersonal
-      .prepare(
-        `
+    return dbPersonal.prepare(`
       SELECT id, client_id, method_code, primary_problem_code, start_date, age_years_at_start
       FROM cases
       WHERE client_id=?
       ORDER BY id DESC
-    `
-      )
-      .all(clientId);
+    `).all(clientId);
   });
 
   ipcMain.handle("cases.readFull", (_e, caseId) => {
-    const c = dbPersonal
-      .prepare(
-        `
+    const c = dbPersonal.prepare(`
       SELECT id, client_id, method_code, primary_problem_code, start_date,
              target_description, sud_start, problem_since_month, problem_duration_months,
              age_years_at_start
       FROM cases WHERE id=?
-    `
-      )
-      .get(caseId);
+    `).get(caseId);
     if (!c) return null;
 
-    const prev = dbPersonal
-      .prepare(
-        `
+    const prev = dbPersonal.prepare(`
       SELECT therapy_type_code, since_month, duration_months, is_completed, note
       FROM case_previous_therapies WHERE case_id=?
       ORDER BY rowid
-    `
-      )
-      .all(caseId);
+    `).all(caseId);
 
-    const meds = dbPersonal
-      .prepare(
-        `
+    const meds = dbPersonal.prepare(`
       SELECT med_code, since_month, dosage_note
       FROM case_medications WHERE case_id=?
       ORDER BY rowid
-    `
-      )
-      .all(caseId);
+    `).all(caseId);
 
-    const lastSud =
-      dbPersonal
-        .prepare(
-          `
+    const lastSud = dbPersonal.prepare(`
       SELECT sud_session FROM sessions WHERE case_id=?
       ORDER BY date DESC, id DESC LIMIT 1
-    `
-        )
-        .get(caseId)?.sud_session ?? null;
+    `).get(caseId)?.sud_session ?? null;
 
-    return {
-      ...c,
-      previous_therapies: prev,
-      medications: meds,
-      sud_current: lastSud,
-    };
+    return { ...c, previous_therapies: prev, medications: meds, sud_current: lastSud };
   });
 
   ipcMain.handle("cases.create", (_e, payload = {}) => {
@@ -425,20 +380,10 @@ app.whenReady().then(() => {
       age_years_at_start = null,
     } = payload;
     if (!client_id) throw new Error("client_id fehlt.");
-    const info = dbPersonal
-      .prepare(
-        `
+    const info = dbPersonal.prepare(`
       INSERT INTO cases(client_id, method_code, primary_problem_code, start_date, age_years_at_start)
       VALUES (?, ?, ?, ?, ?)
-    `
-      )
-      .run(
-        client_id,
-        method_code,
-        primary_problem_code,
-        start_date,
-        age_years_at_start
-      );
+    `).run(client_id, method_code, primary_problem_code, start_date, age_years_at_start);
     return { id: Number(info.lastInsertRowid) };
   });
 
@@ -460,17 +405,10 @@ app.whenReady().then(() => {
 
     dbPersonal.exec("BEGIN");
     try {
-      const ref =
-        dbPersonal
-          .prepare(`SELECT start_date FROM cases WHERE id=?`)
-          .get(case_id)?.start_date ?? null;
-      const calcMonths = problem_since_month
-        ? monthsBetweenYM(problem_since_month, ref)
-        : null;
+      const ref = dbPersonal.prepare(`SELECT start_date FROM cases WHERE id=?`).get(case_id)?.start_date ?? null;
+      const calcMonths = problem_since_month ? monthsBetweenYM(problem_since_month, ref) : null;
 
-      dbPersonal
-        .prepare(
-          `
+      dbPersonal.prepare(`
         UPDATE cases SET
           method_code            = COALESCE(@method_code,           method_code),
           primary_problem_code   = COALESCE(@primary_problem_code,  primary_problem_code),
@@ -480,22 +418,18 @@ app.whenReady().then(() => {
           problem_duration_months= COALESCE(@problem_duration_months, problem_duration_months),
           age_years_at_start     = COALESCE(@age_years_at_start,    age_years_at_start)
         WHERE id=@case_id
-      `
-        )
-        .run({
-          case_id,
-          method_code,
-          primary_problem_code,
-          target_description,
-          sud_start,
-          problem_since_month,
-          problem_duration_months: problem_duration_months ?? calcMonths,
-          age_years_at_start,
-        });
+      `).run({
+        case_id,
+        method_code,
+        primary_problem_code,
+        target_description,
+        sud_start,
+        problem_since_month,
+        problem_duration_months: problem_duration_months ?? calcMonths,
+        age_years_at_start,
+      });
 
-      dbPersonal
-        .prepare(`DELETE FROM case_previous_therapies WHERE case_id=?`)
-        .run(case_id);
+      dbPersonal.prepare(`DELETE FROM case_previous_therapies WHERE case_id=?`).run(case_id);
       const insPT = dbPersonal.prepare(`
         INSERT INTO case_previous_therapies(case_id, therapy_type_code, since_month, duration_months, is_completed, note)
         VALUES (@case_id, @therapy_type_code, @since_month, @duration_months, @is_completed, @note)
@@ -511,9 +445,7 @@ app.whenReady().then(() => {
         });
       }
 
-      dbPersonal
-        .prepare(`DELETE FROM case_medications WHERE case_id=?`)
-        .run(case_id);
+      dbPersonal.prepare(`DELETE FROM case_medications WHERE case_id=?`).run(case_id);
       const insMed = dbPersonal.prepare(`
         INSERT INTO case_medications(case_id, med_code, since_month, dosage_note)
         VALUES (@case_id, @med_code, @since_month, @dosage_note)
@@ -536,29 +468,18 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("cases.updateMethod", (_e, { case_id, method_code }) => {
-    if (!case_id || !method_code)
-      throw new Error("case_id und method_code erforderlich.");
-    dbPersonal
-      .prepare(`UPDATE cases SET method_code=? WHERE id=?`)
-      .run(method_code, case_id);
+    if (!case_id || !method_code) throw new Error("case_id und method_code erforderlich.");
+    dbPersonal.prepare(`UPDATE cases SET method_code=? WHERE id=?`).run(method_code, case_id);
     return { ok: true };
   });
 
   ipcMain.handle("cases.delete", (_e, caseId) => {
     dbPersonal.exec("BEGIN");
     try {
-      dbPersonal
-        .prepare(
-          `DELETE FROM session_notes WHERE session_id IN (SELECT id FROM sessions WHERE case_id=?)`
-        )
-        .run(caseId);
+      dbPersonal.prepare(`DELETE FROM session_notes WHERE session_id IN (SELECT id FROM sessions WHERE case_id=?)`).run(caseId);
       dbPersonal.prepare(`DELETE FROM sessions WHERE case_id=?`).run(caseId);
-      dbPersonal
-        .prepare(`DELETE FROM case_previous_therapies WHERE case_id=?`)
-        .run(caseId);
-      dbPersonal
-        .prepare(`DELETE FROM case_medications WHERE case_id=?`)
-        .run(caseId);
+      dbPersonal.prepare(`DELETE FROM case_previous_therapies WHERE case_id=?`).run(caseId);
+      dbPersonal.prepare(`DELETE FROM case_medications WHERE case_id=?`).run(caseId);
       dbPersonal.prepare(`DELETE FROM cases WHERE id=?`).run(caseId);
       dbPersonal.exec("COMMIT");
       return { ok: true };
@@ -570,39 +491,21 @@ app.whenReady().then(() => {
 
   /* ========== IPC: SESSIONS ========== */
   ipcMain.handle("sessions.listByCase", (_e, caseId) => {
-    return dbPersonal
-      .prepare(
-        `
+    return dbPersonal.prepare(`
       SELECT id, case_id, date, topic, sud_session, duration_min
       FROM sessions WHERE case_id=? ORDER BY date DESC, id DESC
-    `
-      )
-      .all(caseId);
+    `).all(caseId);
   });
 
   ipcMain.handle("sessions.create", (_e, payload = {}) => {
-    const {
-      case_id,
-      date = new Date().toISOString(),
-      topic = null,
-      sud_session = null,
-      duration_min = null,
-      note = null,
-    } = payload;
+    const { case_id, date = new Date().toISOString(), topic = null, sud_session = null, duration_min = null, note = null } = payload;
     if (!case_id) throw new Error("case_id fehlt.");
-    const info = dbPersonal
-      .prepare(
-        `
+    const info = dbPersonal.prepare(`
       INSERT INTO sessions(case_id, date, topic, sud_session, duration_min)
       VALUES (?, ?, ?, ?, ?)
-    `
-      )
-      .run(case_id, date, topic, sud_session, duration_min);
+    `).run(case_id, date, topic, sud_session, duration_min);
     if (note) {
-      dbPersonal
-        .prepare(
-          `INSERT OR REPLACE INTO session_notes(session_id, content) VALUES (?, ?)`
-        )
+      dbPersonal.prepare(`INSERT OR REPLACE INTO session_notes(session_id, content) VALUES (?, ?)`)
         .run(info.lastInsertRowid, note);
     }
     return { id: Number(info.lastInsertRowid) };
@@ -611,13 +514,9 @@ app.whenReady().then(() => {
   ipcMain.handle("sessions.update", (_e, p = {}) => {
     const { id, topic = null, sud_session = null, duration_min = null } = p;
     if (!id) throw new Error("id fehlt.");
-    dbPersonal
-      .prepare(
-        `
+    dbPersonal.prepare(`
       UPDATE sessions SET topic=@topic, sud_session=@sud_session, duration_min=@duration_min WHERE id=@id
-    `
-      )
-      .run({ id, topic, sud_session, duration_min });
+    `).run({ id, topic, sud_session, duration_min });
     return { ok: true };
   });
 
@@ -629,35 +528,22 @@ app.whenReady().then(() => {
 
   /* ========== IPC: KATALOGE ========== */
   ipcMain.handle("catalog.therapyMethods", () =>
-    dbPersonal
-      .prepare(`SELECT code, label FROM therapy_methods ORDER BY label`)
-      .all()
+    dbPersonal.prepare(`SELECT code, label FROM therapy_methods ORDER BY label`).all()
   );
   ipcMain.handle("catalog.problemCategories", () =>
-    dbPersonal
-      .prepare(`SELECT code, label FROM problem_categories ORDER BY label`)
-      .all()
+    dbPersonal.prepare(`SELECT code, label FROM problem_categories ORDER BY label`).all()
   );
   ipcMain.handle("catalog.previousTherapyTypes", () =>
-    dbPersonal
-      .prepare(`SELECT code, label FROM previous_therapy_types ORDER BY label`)
-      .all()
+    dbPersonal.prepare(`SELECT code, label FROM previous_therapy_types ORDER BY label`).all()
   );
   ipcMain.handle("catalog.medicationCatalog", () =>
-    dbPersonal
-      .prepare(`SELECT code, label FROM medication_catalog ORDER BY label`)
-      .all()
+    dbPersonal.prepare(`SELECT code, label FROM medication_catalog ORDER BY label`).all()
   );
 
   /* ========== IPC: REPORTS ========== */
-  // Eine einheitliche View in BEIDEN Datenbanken: v_method_problem_stats
-  ipcMain.handle(
-    "reports.methodProblem",
-    (_e, { source = "personal" } = {}) => {
-      const db = source === "study" ? dbStudy : dbPersonal;
-      return db
-        .prepare(
-          `
+  ipcMain.handle("reports.methodProblem", (_e, { source = "personal" } = {}) => {
+    const db = source === "study" ? dbStudy : dbPersonal;
+    return db.prepare(`
       SELECT method_code, method_label,
              problem_code, problem_label,
              status, cases_n, avg_sessions,
@@ -666,83 +552,45 @@ app.whenReady().then(() => {
              pct_m, pct_w, pct_d, pct_u
       FROM v_method_problem_stats
       ORDER BY method_label, problem_label, status
-    `
-        )
-        .all();
-    }
-  );
+    `).all();
+  });
 
   /* ========== IPC: STUDY-Export & Sync ========== */
   ipcMain.handle("export.study.refresh", () => refreshStudyAgg());
 
-  // CSV-Export (ruft vorher refresh auf) und gibt IMMER { path } zurück
   ipcMain.handle("export.study.toCsv", () => {
     refreshStudyAgg();
-
-    const stats = dbStudy
-      .prepare(
-        `
+    const stats = dbStudy.prepare(`
       SELECT method_label, problem_label, status,
              cases_n, avg_sessions, avg_sud_start, avg_sud_last, avg_sud_delta,
              pct_prev_therapies, avg_prev_duration_mon,
              pct_m, pct_w, pct_d, pct_u
       FROM v_method_problem_stats
       ORDER BY method_label, problem_label, status
-    `
-      )
-      .all();
+    `).all();
 
     const fmtNum = (v) =>
-      v === null || v === undefined || Number.isNaN(v)
-        ? "" // leer lassen
-        : String(v).replace(/\./g, ","); // Dezimalpunkt -> Komma
-    const row = (arr) => arr.join(";");
+      v === null || v === undefined || Number.isNaN(v) ? "" : String(v).replace(/\./g, ",");
 
     const header = [
-      "Methode",
-      "Problem",
-      "Status",
-      "Faelle",
-      "Ø_Sitzungen",
-      "Ø_SUD_Start",
-      "Ø_SUD_Letz",
-      "Ø_Δ_SUD",
-      "%_mit_VorTherapie",
-      "Ø_Dauer_VorTherapie_Mon",
-      "%_m",
-      "%_w",
-      "%_d",
-      "%_u",
+      "Methode","Problem","Status","Faelle","Ø_Sitzungen","Ø_SUD_Start","Ø_SUD_Letz",
+      "Ø_Δ_SUD","%_mit_VorTherapie","Ø_Dauer_VorTherapie_Mon","%_m","%_w","%_d","%_u"
     ];
-    const lines = [header.join(";")];
-    lines.push("sep=;"); // Excel-Separator-Hinweis
-    lines.push(row(header));
+
+    const lines = [];
+    lines.push("sep=;");              // Excel-Separator-Hinweis
+    lines.push(header.join(";"));     // Header
     for (const s of stats) {
-      lines.push(
-        [
-          s.method_label,
-          s.problem_label,
-          s.status,
-          fmtNum(s.cases_n),
-          fmtNum(s.avg_sessions ?? ""),
-          fmtNum(s.avg_sud_start ?? ""),
-          fmtNum(s.avg_sud_last ?? ""),
-          fmtNum(s.avg_sud_delta ?? ""),
-          fmtNum(s.pct_prev_therapies ?? ""),
-          fmtNum(s.avg_prev_duration_mon ?? ""),
-          fmtNum(s.pct_m ?? ""),
-          fmtNum(s.pct_w ?? ""),
-          fmtNum(s.pct_d ?? ""),
-          fmtNum(s.pct_u ?? ""),
-        ].join(";")
-      );
+      lines.push([
+        s.method_label, s.problem_label, s.status,
+        fmtNum(s.cases_n), fmtNum(s.avg_sessions ?? ""),
+        fmtNum(s.avg_sud_start ?? ""), fmtNum(s.avg_sud_last ?? ""), fmtNum(s.avg_sud_delta ?? ""),
+        fmtNum(s.pct_prev_therapies ?? ""), fmtNum(s.avg_prev_duration_mon ?? ""),
+        fmtNum(s.pct_m ?? ""), fmtNum(s.pct_w ?? ""), fmtNum(s.pct_d ?? ""), fmtNum(s.pct_u ?? "")
+      ].join(";"));
     }
 
-    const outPath = path.join(
-      app.getPath("documents"),
-      `notizia_study_export_${Date.now()}.csv`
-    );
-
+    const outPath = path.join(app.getPath("documents"), `notizia_study_export_${Date.now()}.csv`);
     const csv = "\uFEFF" + lines.join("\r\n"); // BOM + CRLF
     fs.writeFileSync(outPath, csv, "utf8");
     return { path: outPath };
@@ -750,15 +598,11 @@ app.whenReady().then(() => {
 
   /* ========== IPC: Wartung ========== */
   ipcMain.handle("maintenance.recalcProblemDurations", () => {
-    const rows = dbPersonal
-      .prepare(
-        `
+    const rows = dbPersonal.prepare(`
       SELECT id, start_date, problem_since_month, problem_duration_months
       FROM cases
       WHERE problem_since_month IS NOT NULL
-    `
-      )
-      .all();
+    `).all();
 
     const upd = dbPersonal.prepare(`
       UPDATE cases
@@ -784,6 +628,134 @@ app.whenReady().then(() => {
     return { scanned: rows.length, changed };
   });
 
+  /* ========== IPC: AUTH ========== */
+  ipcMain.handle("auth.login", (e, { username, password } = {}) => {
+    if (!username || !password) throw new Error("Fehlende Anmeldedaten.");
+    const u = dbPersonal.prepare(`
+      SELECT id, username, password_hash, role FROM users WHERE username=?
+    `).get(username);
+    if (!u || !bcrypt.compareSync(password, u.password_hash)) {
+      throw new Error("Benutzer oder Passwort falsch.");
+    }
+    const winId = BrowserWindow.fromWebContents(e.sender).id;
+    sessions.set(winId, { userId: u.id, username: u.username, role: u.role });
+    return { username: u.username, role: u.role };
+  });
+
+  ipcMain.handle("auth.logout", (e) => {
+    const winId = BrowserWindow.fromWebContents(e.sender).id;
+    sessions.delete(winId);
+    return { ok: true };
+  });
+
+  // Liefert optional must_change_pw (wenn Spalte existiert)
+  ipcMain.handle("auth.me", (e) => {
+    const winId = BrowserWindow.fromWebContents(e.sender).id;
+    const s = sessions.get(winId) || null;
+    if (!s) return null;
+
+    let must_change_pw = false;
+    try {
+      const row = dbPersonal.prepare("SELECT must_change_pw FROM users WHERE id=?").get(s.userId);
+      if (row && typeof row.must_change_pw !== "undefined") {
+        must_change_pw = !!row.must_change_pw;
+      }
+    } catch { /* Spalte existiert evtl. nicht */ }
+
+    return { username: s.username, role: s.role, must_change_pw };
+  });
+
+  // Passwort ändern + must_change_pw auf 0
+  ipcMain.handle("auth.changePassword", (e, { currentPassword, newPassword } = {}) => {
+    if (!currentPassword || !newPassword) throw new Error("Fehlende Angaben.");
+
+    const winId = BrowserWindow.fromWebContents(e.sender).id;
+    const s = sessions.get(winId);
+    if (!s) throw new Error("Nicht angemeldet.");
+
+    const u = dbPersonal.prepare("SELECT id, password_hash FROM users WHERE id=?").get(s.userId);
+    if (!u || !bcrypt.compareSync(currentPassword, u.password_hash)) {
+      throw new Error("Aktuelles Passwort ist falsch.");
+    }
+
+    const newHash = bcrypt.hashSync(newPassword, 12);
+
+    const hasMustChangePw = dbPersonal
+      .prepare("PRAGMA table_info('users')").all()
+      .some(c => c.name === "must_change_pw");
+
+    if (hasMustChangePw) {
+      dbPersonal.prepare(
+        "UPDATE users SET password_hash=?, must_change_pw=0 WHERE id=?"
+      ).run(newHash, u.id);
+    } else {
+      dbPersonal.prepare(
+        "UPDATE users SET password_hash=? WHERE id=?"
+      ).run(newHash, u.id);
+    }
+
+    return { ok: true };
+  });
+function requireAdmin(e) {
+  const winId = BrowserWindow.fromWebContents(e.sender).id;
+  const s = sessions.get(winId);
+  if (!s || s.role !== 'admin') throw new Error('Adminrechte erforderlich.');
+  return s;
+}
+function hasMustChangeColumn() {
+  return dbPersonal.prepare("PRAGMA table_info('users')").all()
+    .some(c => c.name === 'must_change_pw');
+}
+function generateTempPassword(len = 12) {
+  // gut lesbares Set (ohne 0/O, 1/l)
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!?#$%";
+  const bytes = crypto.randomBytes(len);
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
+
+// Liste der Nutzer (Admin)
+ipcMain.handle('auth.users.list', (e) => {
+  requireAdmin(e);
+  const mc = hasMustChangeColumn();
+  const col = mc ? ", must_change_pw" : "";
+  return dbPersonal.prepare(
+    `SELECT id, username, role, created_at${col} FROM users ORDER BY username`
+  ).all();
+});
+
+// Nutzer anlegen (Admin). Wenn password fehlt -> wird generiert & zurückgegeben; must_change_pw=1
+ipcMain.handle('auth.users.create', (e, { username, role = 'therapist', password } = {}) => {
+  requireAdmin(e);
+  if (!username || !/^[a-z0-9._-]{3,32}$/i.test(username)) {
+    throw new Error('Ungültiger Benutzername (3–32 Zeichen, a–z, 0–9, . _ -).');
+  }
+  if (!['therapist', 'admin'].includes(role)) {
+    throw new Error('Ungültige Rolle.');
+  }
+  const exists = dbPersonal.prepare('SELECT 1 FROM users WHERE username=?').get(username);
+  if (exists) throw new Error('Benutzername existiert bereits.');
+
+  const temp = password && String(password).length >= 8 ? String(password) : generateTempPassword(12);
+  const hash = bcrypt.hashSync(temp, 12);
+  const mc = hasMustChangeColumn();
+
+  const info = mc
+    ? dbPersonal.prepare(`
+        INSERT INTO users (username, password_hash, role, must_change_pw)
+        VALUES (@u, @h, @r, 1)
+      `).run({ u: username, h: hash, r: role })
+    : dbPersonal.prepare(`
+        INSERT INTO users (username, password_hash, role)
+        VALUES (@u, @h, @r)
+      `).run({ u: username, h: hash, r: role });
+
+  // Nur zurückgeben, wenn Passwort generiert wurde (damit der Admin es aushändigen kann)
+  return { id: Number(info.lastInsertRowid), tempPassword: password ? undefined : temp };
+});
+
+  // Fenster ERST jetzt erzeugen
   createWindow();
 });
 

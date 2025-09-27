@@ -1,0 +1,3 @@
+PRAGMA foreign_keys=ON;
+
+ALTER TABLE users ADD COLUMN must_change_pw INTEGER NOT NULL DEFAULT 0;
