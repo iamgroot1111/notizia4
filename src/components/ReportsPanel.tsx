@@ -141,8 +141,8 @@ export default function ReportsPanel() {
               <th>Ø SUD Start</th>
               <th>Ø SUD Letzt</th>
               <th>Ø Δ SUD</th>
-              <th>% mit Vor‑Therapie</th>
-              <th>Ø Dauer Vor‑Therapie (Mon)</th>
+              <th>% mit Vor-Therapie</th>
+              <th>Ø Dauer Vor-Therapie (Mon)</th>
               <th>% m</th>
               <th>% w</th>
               <th>% d</th>

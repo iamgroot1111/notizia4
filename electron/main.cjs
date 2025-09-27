@@ -9,7 +9,7 @@ let win;
 let dbPersonal;
 let dbStudy;
 
-/* -------- helpers -------------------------------------------------------- */
+/* ========== Helpers ========== */
 function createWindow() {
   win = new BrowserWindow({
     width: 1200,
@@ -31,7 +31,6 @@ function createWindow() {
 
 function runMigrations(db, dir) {
   if (!fs.existsSync(dir)) return;
-
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +66,7 @@ function runMigrations(db, dir) {
   }
 }
 
-/** add column idempotent */
+/** idempotent: Spalte hinzufügen */
 function addColumnIfMissing(db, table, columnDef) {
   const col = String(columnDef).trim().split(/\s+/, 1)[0];
   const cols = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -77,7 +76,7 @@ function addColumnIfMissing(db, table, columnDef) {
   }
 }
 
-/** misc util */
+/** Utils */
 function monthsBetweenYM(sinceYYYYMM, refISO) {
   if (!sinceYYYYMM) return null;
   const [sy, sm] = String(sinceYYYYMM)
@@ -85,9 +84,8 @@ function monthsBetweenYM(sinceYYYYMM, refISO) {
     .map((n) => parseInt(n, 10));
   if (!sy || !sm) return null;
   const ref = refISO ? new Date(refISO) : new Date();
-  const ry = ref.getFullYear(),
-    rm = ref.getMonth() + 1;
-  return Math.max(0, (ry - sy) * 12 + (rm - sm));
+  const diff = (ref.getFullYear() - sy) * 12 + (ref.getMonth() + 1 - sm);
+  return Math.max(0, diff);
 }
 function toMonth(iso) {
   return iso ? String(iso).slice(0, 7) : null;
@@ -99,11 +97,13 @@ function uidForCase(caseId) {
     .digest("hex");
 }
 
-/* -------- reports SQL (ohne Views) -------------------------------------- */
+/* ========== Reporting-SQL (ohne Views) ========== */
+/** Aggregation pro Fall + Aufsummierung Methode×Problem×Status */
 const METHOD_PROBLEM_SQL = `
 WITH case_base AS (
   SELECT c.id AS case_id, c.client_id,
-         c.method_code, c.primary_problem_code AS problem_code,
+         c.method_code,
+         c.primary_problem_code AS problem_code,
          CASE WHEN c.closed_at IS NULL THEN 'current' ELSE 'closed' END AS status
   FROM cases c
 ),
@@ -112,7 +112,7 @@ sr AS (
          COUNT(*) AS sessions_count,
          (SELECT sud_session FROM sessions s1
             WHERE s1.case_id = s.case_id
-            ORDER BY s1.date ASC, s1.id ASC LIMIT 1)  AS sud_start,
+            ORDER BY s1.date ASC, s1.id ASC LIMIT 1) AS sud_start,
          (SELECT sud_session FROM sessions s2
             WHERE s2.case_id = s.case_id
             ORDER BY s2.date DESC, s2.id DESC LIMIT 1) AS sud_last
@@ -128,8 +128,7 @@ prev AS (
 ),
 gen AS (
   SELECT c.id AS case_id, cl.gender
-  FROM cases c
-  JOIN clients cl ON cl.id = c.client_id
+  FROM cases c JOIN clients cl ON cl.id = c.client_id
 ),
 per_case AS (
   SELECT
@@ -142,7 +141,7 @@ per_case AS (
     CASE WHEN p.has_prev IS NULL THEN 0 ELSE 1 END AS has_prev,
     COALESCE(p.prev_months,0) AS prev_months
   FROM case_base cb
-  LEFT JOIN sr   ON sr.case_id  = cb.case_id
+  LEFT JOIN sr   ON sr.case_id = cb.case_id
   LEFT JOIN prev p ON p.case_id = cb.case_id
   LEFT JOIN gen  g ON g.case_id = cb.case_id
 ),
@@ -166,9 +165,9 @@ agg AS (
 )
 SELECT
   a.method_code,
-  (SELECT label FROM therapy_methods WHERE code=a.method_code) AS method_label,
+  (SELECT label FROM therapy_methods       WHERE code=a.method_code)  AS method_label,
   a.problem_code,
-  (SELECT label FROM problem_categories WHERE code=a.problem_code) AS problem_label,
+  (SELECT label FROM problem_categories    WHERE code=a.problem_code) AS problem_label,
   a.status,
   a.cases_count, a.sessions_count, a.avg_sessions,
   ROUND(a.avg_sud_start,2) AS avg_sud_start,
@@ -181,28 +180,65 @@ FROM agg a
 ORDER BY method_label, problem_label, status;
 `;
 
-/* -------- app init ------------------------------------------------------ */
+/* ========== App init ========== */
 app.whenReady().then(() => {
-  const base = app.getPath("userData"); // z.B. %APPDATA%/notizia4
+  const base = app.getPath("userData"); // z. B. %APPDATA%/notizia4
 
   dbPersonal = new Database(path.join(base, "personal.sqlite"));
   dbStudy = new Database(path.join(base, "study.sqlite"));
   dbPersonal.pragma("journal_mode = WAL");
   dbStudy.pragma("journal_mode = WAL");
 
-  // optionale Schutzspalten (idempotent)
+  // optionale (idempotente) Schutzspalten
   addColumnIfMissing(dbPersonal, "cases", "target_description TEXT");
   addColumnIfMissing(dbPersonal, "cases", "sud_start REAL");
-  addColumnIfMissing(dbPersonal, "cases", "problem_since_month TEXT"); // YYYY-MM
+  addColumnIfMissing(dbPersonal, "cases", "problem_since_month TEXT");
   addColumnIfMissing(dbPersonal, "cases", "problem_duration_months INTEGER");
   addColumnIfMissing(dbPersonal, "cases", "age_years_at_start INTEGER");
   addColumnIfMissing(dbPersonal, "cases", "closed_at TEXT");
 
-  // Migrationen
+  // Migrationen (legt auch Views wie v_method_problem_stats an)
   runMigrations(dbPersonal, path.join(__dirname, "../sql/personal"));
   runMigrations(dbStudy, path.join(__dirname, "../sql/study"));
 
-  /* ---------------------- IPC: CLIENTS ---------------------------------- */
+  /* ---------- Helper zum Befüllen der Study-DB ---------- */
+  function refreshStudyAgg() {
+    const rows = dbPersonal.prepare(METHOD_PROBLEM_SQL).all();
+    dbStudy.exec(`
+      BEGIN;
+      CREATE TABLE IF NOT EXISTS study_agg_method_problem (
+        method_code TEXT, method_label TEXT,
+        problem_code TEXT, problem_label TEXT,
+        status TEXT CHECK (status IN ('current','closed')),
+        cases_count INTEGER, sessions_count INTEGER, avg_sessions REAL,
+        avg_sud_start REAL, avg_sud_last REAL, avg_sud_delta REAL,
+        prev_therapies_share REAL, prev_therapies_avg_months REAL,
+        genders_m INTEGER, genders_w INTEGER, genders_d INTEGER, genders_u INTEGER
+      );
+      DELETE FROM study_agg_method_problem;
+      COMMIT;
+    `);
+    const ins = dbStudy.prepare(`
+      INSERT INTO study_agg_method_problem
+      (method_code, method_label, problem_code, problem_label, status,
+       cases_count, sessions_count, avg_sessions,
+       avg_sud_start, avg_sud_last, avg_sud_delta,
+       prev_therapies_share, prev_therapies_avg_months,
+       genders_m, genders_w, genders_d, genders_u)
+      VALUES (@method_code, @method_label, @problem_code, @problem_label, @status,
+              @cases_count, @sessions_count, @avg_sessions,
+              @avg_sud_start, @avg_sud_last, @avg_sud_delta,
+              @prev_therapies_share, @prev_therapies_avg_months,
+              @genders_m, @genders_w, @genders_d, @genders_u)
+    `);
+    const tx = dbStudy.transaction((items) => {
+      for (const r of items) ins.run(r);
+    });
+    tx(rows);
+    return { inserted: rows.length };
+  }
+
+  /* ========== IPC: CLIENTS ========== */
   ipcMain.handle("clients.list", () => {
     return dbPersonal
       .prepare(
@@ -237,7 +273,7 @@ app.whenReady().then(() => {
       .run(String(full_name).trim(), gender, dob, contact);
     const clientId = Number(info.lastInsertRowid);
 
-    // optional direkt ersten Fall anlegen
+    // optional: ersten Fall direkt anlegen
     if (
       intake &&
       (intake.age_years_at_start != null ||
@@ -280,7 +316,7 @@ app.whenReady().then(() => {
       UPDATE clients
          SET full_name = COALESCE(@full_name, full_name),
              gender    = COALESCE(@gender, gender),
-             dob       = CASE WHEN @dob IS NULL THEN dob ELSE @dob END,
+             dob       = CASE WHEN @dob     IS NULL THEN dob     ELSE @dob     END,
              contact   = CASE WHEN @contact IS NULL THEN contact ELSE @contact END
        WHERE id=@id
     `
@@ -307,7 +343,7 @@ app.whenReady().then(() => {
       .run(id);
     dbPersonal
       .prepare(
-        `DELETE FROM case_medications WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`
+        `DELETE FROM case_medications     WHERE case_id IN (SELECT id FROM cases WHERE client_id=?)`
       )
       .run(id);
     dbPersonal.prepare(`DELETE FROM cases WHERE client_id=?`).run(id);
@@ -315,7 +351,7 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
-  /* ---------------------- IPC: CASES ------------------------------------ */
+  /* ========== IPC: CASES ========== */
   ipcMain.handle("cases.listByClient", (_e, clientId) => {
     return dbPersonal
       .prepare(
@@ -413,8 +449,8 @@ app.whenReady().then(() => {
       primary_problem_code = null,
       target_description = null,
       sud_start = null,
-      sud_current = null, // nur Durchreiche, wird nicht gespeichert
-      problem_since_month = null, // YYYY-MM
+      sud_current = null,
+      problem_since_month = null,
       problem_duration_months = null,
       age_years_at_start = null,
       previous_therapies = [],
@@ -436,13 +472,13 @@ app.whenReady().then(() => {
         .prepare(
           `
         UPDATE cases SET
-          method_code            = COALESCE(@method_code, method_code),
-          primary_problem_code   = COALESCE(@primary_problem_code, primary_problem_code),
-          target_description     = COALESCE(@target_description, target_description),
-          sud_start              = COALESCE(@sud_start, sud_start),
-          problem_since_month    = COALESCE(@problem_since_month, problem_since_month),
+          method_code            = COALESCE(@method_code,           method_code),
+          primary_problem_code   = COALESCE(@primary_problem_code,  primary_problem_code),
+          target_description     = COALESCE(@target_description,    target_description),
+          sud_start              = COALESCE(@sud_start,             sud_start),
+          problem_since_month    = COALESCE(@problem_since_month,   problem_since_month),
           problem_duration_months= COALESCE(@problem_duration_months, problem_duration_months),
-          age_years_at_start     = COALESCE(@age_years_at_start, age_years_at_start)
+          age_years_at_start     = COALESCE(@age_years_at_start,    age_years_at_start)
         WHERE id=@case_id
       `
         )
@@ -532,7 +568,7 @@ app.whenReady().then(() => {
     }
   });
 
-  /* ---------------------- IPC: SESSIONS --------------------------------- */
+  /* ========== IPC: SESSIONS ========== */
   ipcMain.handle("sessions.listByCase", (_e, caseId) => {
     return dbPersonal
       .prepare(
@@ -578,9 +614,7 @@ app.whenReady().then(() => {
     dbPersonal
       .prepare(
         `
-      UPDATE sessions
-         SET topic=@topic, sud_session=@sud_session, duration_min=@duration_min
-       WHERE id=@id
+      UPDATE sessions SET topic=@topic, sud_session=@sud_session, duration_min=@duration_min WHERE id=@id
     `
       )
       .run({ id, topic, sud_session, duration_min });
@@ -593,7 +627,7 @@ app.whenReady().then(() => {
     return { ok: true };
   });
 
-  /* ---------------------- IPC: KATALOGE --------------------------------- */
+  /* ========== IPC: KATALOGE ========== */
   ipcMain.handle("catalog.therapyMethods", () =>
     dbPersonal
       .prepare(`SELECT code, label FROM therapy_methods ORDER BY label`)
@@ -615,167 +649,137 @@ app.whenReady().then(() => {
       .all()
   );
 
-  /* ---------------------- IPC: REPORTS ---------------------------------- */
-  // --- IPC: REPORTS (eine einheitliche View in beiden DBs) ---
-ipcMain.handle('reports.methodProblem', (_e, { source = 'personal' } = {}) => {
-  const db = source === 'study' ? dbStudy : dbPersonal;
-  // liest NUR aus v_method_problem_stats (gibt es jetzt in BEIDEN DBs)
-  return db.prepare(`
-    SELECT method_code, method_label,
-           problem_code, problem_label,
-           status, cases_n, avg_sessions,
-           avg_sud_start, avg_sud_last, avg_sud_delta,
-           pct_prev_therapies, avg_prev_duration_mon,
-           pct_m, pct_w, pct_d, pct_u
-    FROM v_method_problem_stats
-    ORDER BY method_label, problem_label, status
-  `).all();
-});
-
-
-  const REPORT_VIEWS_SQL = `
--- exakt die vier CREATE/DROP VIEW Blöcke aus Abschnitt A einfügen
-`;
-
-  ipcMain.handle("maintenance.rebuildViews", () => {
-    dbPersonal.exec("BEGIN");
-    try {
-      dbPersonal.exec(REPORT_VIEWS_SQL);
-      dbPersonal.exec("COMMIT");
-      return { ok: true };
-    } catch (e) {
-      dbPersonal.exec("ROLLBACK");
-      throw e;
+  /* ========== IPC: REPORTS ========== */
+  // Eine einheitliche View in BEIDEN Datenbanken: v_method_problem_stats
+  ipcMain.handle(
+    "reports.methodProblem",
+    (_e, { source = "personal" } = {}) => {
+      const db = source === "study" ? dbStudy : dbPersonal;
+      return db
+        .prepare(
+          `
+      SELECT method_code, method_label,
+             problem_code, problem_label,
+             status, cases_n, avg_sessions,
+             avg_sud_start, avg_sud_last, avg_sud_delta,
+             pct_prev_therapies, avg_prev_duration_mon,
+             pct_m, pct_w, pct_d, pct_u
+      FROM v_method_problem_stats
+      ORDER BY method_label, problem_label, status
+    `
+        )
+        .all();
     }
-  });
+  );
 
-  /* ---------------------- IPC: STUDY-EXPORT ------------------------------ */
-  ipcMain.handle("export.study.refresh", () => {
-    const rows = dbPersonal.prepare(METHOD_PROBLEM_SQL).all();
-    dbStudy.exec(`
-      BEGIN;
-      CREATE TABLE IF NOT EXISTS study_agg_method_problem (
-        method_code TEXT, method_label TEXT,
-        problem_code TEXT, problem_label TEXT,
-        status TEXT,
-        cases_count INTEGER, sessions_count INTEGER, avg_sessions REAL,
-        avg_sud_start REAL, avg_sud_last REAL, avg_sud_delta REAL,
-        prev_therapies_share REAL, prev_therapies_avg_months REAL,
-        genders_m INTEGER, genders_w INTEGER, genders_d INTEGER, genders_u INTEGER
+  /* ========== IPC: STUDY-Export & Sync ========== */
+  ipcMain.handle("export.study.refresh", () => refreshStudyAgg());
+
+  // CSV-Export (ruft vorher refresh auf) und gibt IMMER { path } zurück
+  ipcMain.handle("export.study.toCsv", () => {
+    refreshStudyAgg();
+
+    const stats = dbStudy
+      .prepare(
+        `
+      SELECT method_label, problem_label, status,
+             cases_n, avg_sessions, avg_sud_start, avg_sud_last, avg_sud_delta,
+             pct_prev_therapies, avg_prev_duration_mon,
+             pct_m, pct_w, pct_d, pct_u
+      FROM v_method_problem_stats
+      ORDER BY method_label, problem_label, status
+    `
+      )
+      .all();
+
+    const fmtNum = (v) =>
+      v === null || v === undefined || Number.isNaN(v)
+        ? "" // leer lassen
+        : String(v).replace(/\./g, ","); // Dezimalpunkt -> Komma
+    const row = (arr) => arr.join(";");
+
+    const header = [
+      "Methode",
+      "Problem",
+      "Status",
+      "Faelle",
+      "Ø_Sitzungen",
+      "Ø_SUD_Start",
+      "Ø_SUD_Letz",
+      "Ø_Δ_SUD",
+      "%_mit_VorTherapie",
+      "Ø_Dauer_VorTherapie_Mon",
+      "%_m",
+      "%_w",
+      "%_d",
+      "%_u",
+    ];
+    const lines = [header.join(";")];
+    lines.push("sep=;"); // Excel-Separator-Hinweis
+    lines.push(row(header));
+    for (const s of stats) {
+      lines.push(
+        [
+          s.method_label,
+          s.problem_label,
+          s.status,
+          fmtNum(s.cases_n),
+          fmtNum(s.avg_sessions ?? ""),
+          fmtNum(s.avg_sud_start ?? ""),
+          fmtNum(s.avg_sud_last ?? ""),
+          fmtNum(s.avg_sud_delta ?? ""),
+          fmtNum(s.pct_prev_therapies ?? ""),
+          fmtNum(s.avg_prev_duration_mon ?? ""),
+          fmtNum(s.pct_m ?? ""),
+          fmtNum(s.pct_w ?? ""),
+          fmtNum(s.pct_d ?? ""),
+          fmtNum(s.pct_u ?? ""),
+        ].join(";")
       );
-      DELETE FROM study_agg_method_problem;
-      COMMIT;
-    `);
-    const ins = dbStudy.prepare(`
-      INSERT INTO study_agg_method_problem
-      (method_code, method_label, problem_code, problem_label, status,
-       cases_count, sessions_count, avg_sessions,
-       avg_sud_start, avg_sud_last, avg_sud_delta,
-       prev_therapies_share, prev_therapies_avg_months,
-       genders_m, genders_w, genders_d, genders_u)
-      VALUES (@method_code, @method_label, @problem_code, @problem_label, @status,
-              @cases_count, @sessions_count, @avg_sessions,
-              @avg_sud_start, @avg_sud_last, @avg_sud_delta,
-              @prev_therapies_share, @prev_therapies_avg_months,
-              @genders_m, @genders_w, @genders_d, @genders_u)
-    `);
-    const tx = dbStudy.transaction((items) => {
-      for (const r of items) ins.run(r);
-    });
-    tx(rows);
-    return { ok: true };
+    }
+
+    const outPath = path.join(
+      app.getPath("documents"),
+      `notizia_study_export_${Date.now()}.csv`
+    );
+
+    const csv = "\uFEFF" + lines.join("\r\n"); // BOM + CRLF
+    fs.writeFileSync(outPath, csv, "utf8");
+    return { path: outPath };
   });
 
- // --- STUDY: CSV-Export (inkl. automatischem Neuaufbau) ---
-// oben in main.cjs vorhanden?
-// const { app, BrowserWindow, ipcMain } = require('electron');
-// const fs = require('node:fs');
-// const path = require('node:path');
-
-ipcMain.handle('export.study.toCsv', () => {
-  // 1) Aggregierte Daten (Study-DB) lesen
-  const stats = dbStudy.prepare(`
-    SELECT
-      method_label,
-      problem_label,
-      status,
-      cases_n,
-      avg_sessions,
-      avg_sud_start,
-      avg_sud_last,
-      avg_sud_delta,
-      pct_prev_therapies,
-      avg_prev_duration_mon,
-      pct_m, pct_w, pct_d, pct_u
-    FROM v_method_problem_stats
-    ORDER BY method_label, problem_label, status
-  `).all();
-
-  // 2) CSV (mit Kopfzeile; Semikolon als Trennzeichen)
-  const header = [
-    'Methode','Problem','Status','Faelle','Ø_Sitzungen',
-    'Ø_SUD_Start','Ø_SUD_Letz','Ø_Δ_SUD',
-    '%_mit_VorTherapie','Ø_Dauer_VorTherapie_Mon',
-    '%_m','%_w','%_d','%_u'
-  ];
-  const lines = [header.join(';')];
-  for (const s of stats) {
-    lines.push([
-      s.method_label,
-      s.problem_label,
-      s.status,
-      s.cases_n,
-      s.avg_sessions ?? '',
-      s.avg_sud_start ?? '',
-      s.avg_sud_last ?? '',
-      s.avg_sud_delta ?? '',
-      s.pct_prev_therapies ?? '',
-      s.avg_prev_duration_mon ?? '',
-      s.pct_m ?? '', s.pct_w ?? '', s.pct_d ?? '', s.pct_u ?? ''
-    ].join(';'));
-  }
-
-  // 3) Datei schreiben und *Pfad* zurückgeben
-  const outPath = path.join(app.getPath('documents'), `notizia_study_export_${Date.now()}.csv`);
-  fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
-  return { path: outPath };     // <-- wichtig: 'path', nicht 'file'
-});
-
-
-
-  // --- Wartung: Problemdauer (Monate) aus "problem_since_month" nachtragen/aktualisieren
+  /* ========== IPC: Wartung ========== */
   ipcMain.handle("maintenance.recalcProblemDurations", () => {
     const rows = dbPersonal
       .prepare(
         `
-    SELECT id, start_date, problem_since_month, problem_duration_months
-    FROM cases
-    WHERE problem_since_month IS NOT NULL
-  `
+      SELECT id, start_date, problem_since_month, problem_duration_months
+      FROM cases
+      WHERE problem_since_month IS NOT NULL
+    `
       )
       .all();
 
     const upd = dbPersonal.prepare(`
-    UPDATE cases
-       SET problem_duration_months = @new_m
-     WHERE id = @id
-       AND (problem_duration_months IS NULL OR problem_duration_months <> @new_m)
-  `);
+      UPDATE cases
+         SET problem_duration_months = @new_m
+       WHERE id = @id
+         AND (problem_duration_months IS NULL OR problem_duration_months <> @new_m)
+    `);
 
     let changed = 0;
     dbPersonal.exec("BEGIN");
     try {
       for (const r of rows) {
-        const new_m = monthsBetweenYM(r.problem_since_month, r.start_date); // 0..N oder null
+        const new_m = monthsBetweenYM(r.problem_since_month, r.start_date);
         const res = upd.run({ id: r.id, new_m });
-        changed += res.changes | 0; // nur echte Änderungen zählen
+        changed += res.changes | 0;
       }
       dbPersonal.exec("COMMIT");
     } catch (e) {
       dbPersonal.exec("ROLLBACK");
       throw e;
     }
-    // zur Diagnose in der Konsole sehen
     console.log(`[maintenance] scanned=${rows.length}, changed=${changed}`);
     return { scanned: rows.length, changed };
   });
