@@ -344,22 +344,33 @@ export default function ClientsPanel(): React.JSX.Element {
       </form>
 
       {/* Suche + Listen-Schalter */}
-      <div className="n4-row n4-row--2" style={{ marginTop: 8 }}>
-        <label style={{ flex: 1 }}>
-          Suchen 
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Name …"
-          />
-        </label>
-        <button type="button" onClick={() => setListOpen((o) => !o)}>
-          {listOpen ? "Liste ausblenden" : "Liste anzeigen"}
-        </button>
-        <button type="button" onClick={() => void reload()} disabled={busy}>
-          Aktualisieren
-        </button>
-      </div>
+      <div className="n4-row n4-row--end" style={{ marginTop: 8 }}>
+  <label className="n4-grow">
+    Suchen
+    <input
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+      placeholder="Name …"
+    />
+  </label>
+
+  <button
+    type="button"
+    className="n4-btn n4-btn-min"
+    onClick={() => setListOpen(o => !o)}
+  >
+    {listOpen ? "Liste ausblenden" : "Liste anzeigen"}
+  </button>
+
+  <button
+    type="button"
+    className="n4-btn n4-btn-min"
+    onClick={() => void reload()}
+    disabled={busy}
+  >
+    Aktualisieren
+  </button>
+</div>
 
       {error && <p className="n4-error">⚠️ {error}</p>}
 

@@ -299,3 +299,7 @@ input, select, textarea, button {
 }
 .n4-table tr > *:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
 .n4-table tr > *:last-child  { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+/* Element soll die verfügbare Breite nehmen, Buttons daneben bleiben kompakt */
+.n4-grow { flex: 1 1 320px; }         /* min. 320 px Breite */
+.n4-row--end { align-items: flex-end; } /* Input-Basislinie = Button-Unterkante */
+.n4-btn-min { min-width: 140px; }      /* komfortable Mindestbreite */
