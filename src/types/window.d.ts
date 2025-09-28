@@ -179,15 +179,25 @@ declare global {
         delete(id: number): Promise<{ ok: true }>;
       };
 
+      // ... innerhalb von declare global { interface Window { api: { ... } } }
       sessions: {
-        listByCase(id: number): Promise<SessionRow[]>;
+        listByCase(caseId: number): Promise<
+          Array<{
+            id: number;
+            case_id: number;
+            date: string;
+            topic: string | null;
+            sud_session: number | null;
+            duration_min: number | null;
+          }>
+        >;
         create(p: {
           case_id: number;
           date?: string;
           topic?: string | null;
           sud_session?: number | null;
           duration_min?: number | null;
-          note?: string | null;
+          note?: string | null; // <— WICHTIG: gibt es in main.cjs
         }): Promise<{ id: number }>;
         update(p: {
           id: number;

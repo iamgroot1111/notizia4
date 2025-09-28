@@ -74,7 +74,7 @@ export default function ReportsPanel() {
     <section className="n4-panel">
       <h2>Auswertungen</h2>
 
-      <div className="n4-row">
+      <div className="n4-row n4-row--3 n4-form" style={{ marginBottom: 8 }}>
         <label>
           Quelle
           <select

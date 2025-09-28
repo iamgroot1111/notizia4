@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState, type FormEvent } from "react";
 
 /* ---------- Typen direkt aus der Preload-Bridge ableiten ---------- */
 type Client = Awaited<ReturnType<typeof window.api.clients.list>>[number];
-type CaseRow = Awaited<ReturnType<typeof window.api.cases.listByClient>>[number];
+type CaseRow = Awaited<
+  ReturnType<typeof window.api.cases.listByClient>
+>[number];
 type CaseFull = NonNullable<
   Awaited<ReturnType<typeof window.api.cases.readFull>>
 >;
@@ -12,8 +14,9 @@ type Gender = "m" | "w" | "d" | "u";
 /** exakte Payload-Typen der Bridge (kein any) */
 type ClientsCreatePayload = Parameters<typeof window.api.clients.create>[0];
 type CasesCreatePayload = Parameters<typeof window.api.cases.create>[0];
-type SaveAnamnesisPayload =
-  Parameters<typeof window.api.cases.saveAnamnesis>[0];
+type SaveAnamnesisPayload = Parameters<
+  typeof window.api.cases.saveAnamnesis
+>[0];
 
 /* ---------- Detail-Listen ---------- */
 type PrevTher = {
@@ -116,10 +119,22 @@ export default function ClientsPanel(): React.JSX.Element {
 
   useEffect(() => {
     void reload();
-    window.api.catalog.therapyMethods().then(setMethods).catch(() => setMethods([]));
-    window.api.catalog.problemCategories().then(setProblems).catch(() => setProblems([]));
-    window.api.catalog.previousTherapyTypes().then(setTherTypes).catch(() => setTherTypes([]));
-    window.api.catalog.medicationCatalog().then(setMedCatalog).catch(() => setMedCatalog([]));
+    window.api.catalog
+      .therapyMethods()
+      .then(setMethods)
+      .catch(() => setMethods([]));
+    window.api.catalog
+      .problemCategories()
+      .then(setProblems)
+      .catch(() => setProblems([]));
+    window.api.catalog
+      .previousTherapyTypes()
+      .then(setTherTypes)
+      .catch(() => setTherTypes([]));
+    window.api.catalog
+      .medicationCatalog()
+      .then(setMedCatalog)
+      .catch(() => setMedCatalog([]));
   }, []);
 
   /* ---------- Klient anlegen: nur Name, Geschlecht, Alter (Start) ---------- */
@@ -151,7 +166,9 @@ export default function ClientsPanel(): React.JSX.Element {
   /* ---------- Suche ---------- */
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? clients.filter((c) => c.full_name.toLowerCase().includes(q)) : clients;
+    return q
+      ? clients.filter((c) => c.full_name.toLowerCase().includes(q))
+      : clients;
   }, [clients, query]);
 
   /* ---------- Details auf/zu ---------- */
@@ -222,7 +239,8 @@ export default function ClientsPanel(): React.JSX.Element {
       // falls "seit wann" gesetzt ist und Dauer leer -> clientseitig berechnen
       let duration = editCase.problem_duration_months ?? null;
       if (editCase.problem_since_month && duration == null) {
-        const ref = editCase.start_date ?? new Date().toISOString().slice(0, 10);
+        const ref =
+          editCase.start_date ?? new Date().toISOString().slice(0, 10);
         duration = monthsBetweenYM(editCase.problem_since_month, ref);
       }
 
@@ -272,7 +290,9 @@ export default function ClientsPanel(): React.JSX.Element {
     ]);
   }
   function updPrevTher(i: number, patch: Partial<PrevTher>): void {
-    setPrevTherapies((v) => v.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+    setPrevTherapies((v) =>
+      v.map((x, idx) => (idx === i ? { ...x, ...patch } : x))
+    );
   }
   function delPrevTher(i: number): void {
     setPrevTherapies((v) => v.filter((_, idx) => idx !== i));
@@ -281,11 +301,17 @@ export default function ClientsPanel(): React.JSX.Element {
   function addMed(): void {
     setMedications((v) => [
       ...v,
-      { med_code: medCatalog[0]?.code || "", since_month: null, dosage_note: null },
+      {
+        med_code: medCatalog[0]?.code || "",
+        since_month: null,
+        dosage_note: null,
+      },
     ]);
   }
   function updMed(i: number, patch: Partial<MedItem>): void {
-    setMedications((v) => v.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+    setMedications((v) =>
+      v.map((x, idx) => (idx === i ? { ...x, ...patch } : x))
+    );
   }
   function delMed(i: number): void {
     setMedications((v) => v.filter((_, idx) => idx !== i));
@@ -297,9 +323,14 @@ export default function ClientsPanel(): React.JSX.Element {
       <h2>Klienten</h2>
 
       {/* Anlegen */}
-      <form onSubmit={createClient} className="n4-form" aria-label="Klient anlegen">
-        <div className="n4-row n4-row--2">
-          <label style={{ flex: 2 }}>
+      <form
+        onSubmit={createClient}
+        className="n4-form"
+        aria-label="Klient anlegen"
+      >
+        {/* Zeile 1: Name (breit) */}
+        <div className="n4-row n4-form">
+          <label className="n4-grow">
             Voller Name
             <input
               value={fullName}
@@ -307,11 +338,15 @@ export default function ClientsPanel(): React.JSX.Element {
               required
             />
           </label>
+        </div>
+
+        {/* Zeile 2: Geschlecht + Alter nebeneinander */}
+        <div className="n4-row n4-row--2 n4-form" style={{ marginTop: 8 }}>
           <label>
             Geschlecht
             <select
               value={gender}
-              onChange={(e) => setGender(e.target.value as Gender | "")}
+              onChange={(e) => setGender(e.target.value as Gender)}
               required
             >
               <option value="">– wählen –</option>
@@ -327,13 +362,11 @@ export default function ClientsPanel(): React.JSX.Element {
               type="number"
               min={0}
               max={120}
-              value={ageAtStart}
-              onChange={(e) =>
-                setAgeAtStart(e.target.value === "" ? "" : Number(e.target.value))
-              }
-              required
+              value={ageAtStart ?? ""}
+              onChange={(e) => setAgeAtStart(Number(e.target.value) || 0)}
             />
           </label>
+
           <button
             type="submit"
             disabled={busy || !fullName.trim() || !gender || ageAtStart === ""}
@@ -344,33 +377,36 @@ export default function ClientsPanel(): React.JSX.Element {
       </form>
 
       {/* Suche + Listen-Schalter */}
-      <div className="n4-row n4-row--end" style={{ marginTop: 8 }}>
-  <label className="n4-grow">
-    Suchen
-    <input
-      value={query}
-      onChange={(e) => setQuery(e.target.value)}
-      placeholder="Name …"
-    />
-  </label>
+      {/* Suche + Listen-Schalter */}
+      <div className="n4-row n4-row--end n4-form" style={{ marginTop: 12 }}>
+        <label className="n4-grow">
+          Suchen
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Name …"
+          />
+        </label>
 
-  <button
-    type="button"
-    className="n4-btn n4-btn-min"
-    onClick={() => setListOpen(o => !o)}
-  >
-    {listOpen ? "Liste ausblenden" : "Liste anzeigen"}
-  </button>
+        <div className="n4-actions">
+          <button
+            type="button"
+            className="n4-btn n4-btn-min"
+            onClick={() => setListOpen((o) => !o)}
+          >
+            {listOpen ? "Liste ausblenden" : "Liste anzeigen"}
+          </button>
 
-  <button
-    type="button"
-    className="n4-btn n4-btn-min"
-    onClick={() => void reload()}
-    disabled={busy}
-  >
-    Aktualisieren
-  </button>
-</div>
+          <button
+            type="button"
+            className="n4-btn n4-btn-min"
+            onClick={() => void reload()}
+            disabled={busy}
+          >
+            Aktualisieren
+          </button>
+        </div>
+      </div>
 
       {error && <p className="n4-error">⚠️ {error}</p>}
 
@@ -395,7 +431,9 @@ export default function ClientsPanel(): React.JSX.Element {
                       <button
                         type="button"
                         onClick={() => void toggleDetails(c.id)}
-                        title={openClientId === c.id ? "Einklappen" : "Aufklappen"}
+                        title={
+                          openClientId === c.id ? "Einklappen" : "Aufklappen"
+                        }
                       >
                         {openClientId === c.id ? "▾" : "▸"}
                       </button>
@@ -412,10 +450,18 @@ export default function ClientsPanel(): React.JSX.Element {
                       <td colSpan={4}>
                         <div className="n4-card">
                           {/* Anamnese */}
-                          <div className="n4-row" style={{ alignItems: "center" }}>
-                            <h3 style={{ margin: 0, flex: 1 }}>Fall (Anamnese)</h3>
+                          <div
+                            className="n4-row"
+                            style={{ alignItems: "center" }}
+                          >
+                            <h3 style={{ margin: 0, flex: 1 }}>
+                              Fall (Anamnese)
+                            </h3>
                             {clientCases.length === 0 && (
-                              <button type="button" onClick={() => void createAnamnesis()}>
+                              <button
+                                type="button"
+                                onClick={() => void createAnamnesis()}
+                              >
                                 Anamnese anlegen
                               </button>
                             )}
@@ -454,7 +500,9 @@ export default function ClientsPanel(): React.JSX.Element {
                                       setEditCase((v) => ({
                                         ...v,
                                         age_years_at_start:
-                                          e.target.value === "" ? null : Number(e.target.value),
+                                          e.target.value === ""
+                                            ? null
+                                            : Number(e.target.value),
                                       }))
                                     }
                                   />
@@ -491,9 +539,13 @@ export default function ClientsPanel(): React.JSX.Element {
                                     onChange={(e) => {
                                       const since = e.target.value || null;
                                       setEditCase((v) => {
-                                        const next = { ...v, problem_since_month: since };
+                                        const next = {
+                                          ...v,
+                                          problem_since_month: since,
+                                        };
                                         const ref =
-                                          v?.start_date ?? new Date().toISOString().slice(0, 10);
+                                          v?.start_date ??
+                                          new Date().toISOString().slice(0, 10);
                                         next.problem_duration_months = since
                                           ? monthsBetweenYM(since, ref)
                                           : v.problem_duration_months ?? null;
@@ -514,7 +566,9 @@ export default function ClientsPanel(): React.JSX.Element {
                                       setEditCase((v) => ({
                                         ...v,
                                         sud_current:
-                                          e.target.value === "" ? null : Number(e.target.value),
+                                          e.target.value === ""
+                                            ? null
+                                            : Number(e.target.value),
                                       }))
                                     }
                                   />
@@ -525,12 +579,16 @@ export default function ClientsPanel(): React.JSX.Element {
                                   <input
                                     type="number"
                                     min={0}
-                                    value={editCase.problem_duration_months ?? ""}
+                                    value={
+                                      editCase.problem_duration_months ?? ""
+                                    }
                                     onChange={(e) =>
                                       setEditCase((v) => ({
                                         ...v,
                                         problem_duration_months:
-                                          e.target.value === "" ? null : Number(e.target.value),
+                                          e.target.value === ""
+                                            ? null
+                                            : Number(e.target.value),
                                       }))
                                     }
                                     readOnly={!!editCase.problem_since_month}
@@ -562,7 +620,9 @@ export default function ClientsPanel(): React.JSX.Element {
                               </label>
 
                               {/* Bisherige Therapien */}
-                              <h4 style={{ marginTop: 12 }}>Bisherige Therapien</h4>
+                              <h4 style={{ marginTop: 12 }}>
+                                Bisherige Therapien
+                              </h4>
                               <div className="n4-table-wrap">
                                 <table className="n4-table">
                                   <thead>
@@ -583,12 +643,16 @@ export default function ClientsPanel(): React.JSX.Element {
                                             value={t.therapy_type_code}
                                             onChange={(e) =>
                                               updPrevTher(i, {
-                                                therapy_type_code: e.target.value,
+                                                therapy_type_code:
+                                                  e.target.value,
                                               })
                                             }
                                           >
                                             {therTypes.map((tt) => (
-                                              <option key={tt.code} value={tt.code}>
+                                              <option
+                                                key={tt.code}
+                                                value={tt.code}
+                                              >
                                                 {tt.label}
                                               </option>
                                             ))}
@@ -600,7 +664,8 @@ export default function ClientsPanel(): React.JSX.Element {
                                             value={t.since_month ?? ""}
                                             onChange={(e) =>
                                               updPrevTher(i, {
-                                                since_month: e.target.value || null,
+                                                since_month:
+                                                  e.target.value || null,
                                               })
                                             }
                                           />
@@ -625,7 +690,9 @@ export default function ClientsPanel(): React.JSX.Element {
                                             type="checkbox"
                                             checked={!!t.is_completed}
                                             onChange={(e) =>
-                                              updPrevTher(i, { is_completed: e.target.checked })
+                                              updPrevTher(i, {
+                                                is_completed: e.target.checked,
+                                              })
                                             }
                                           />
                                         </td>
@@ -633,12 +700,17 @@ export default function ClientsPanel(): React.JSX.Element {
                                           <input
                                             value={t.note ?? ""}
                                             onChange={(e) =>
-                                              updPrevTher(i, { note: e.target.value || null })
+                                              updPrevTher(i, {
+                                                note: e.target.value || null,
+                                              })
                                             }
                                           />
                                         </td>
                                         <td>
-                                          <button type="button" onClick={() => delPrevTher(i)}>
+                                          <button
+                                            type="button"
+                                            onClick={() => delPrevTher(i)}
+                                          >
                                             🗑
                                           </button>
                                         </td>
@@ -646,7 +718,13 @@ export default function ClientsPanel(): React.JSX.Element {
                                     ))}
                                     {prevTherapies.length === 0 && (
                                       <tr>
-                                        <td colSpan={6} style={{ textAlign: "center", opacity: 0.7 }}>
+                                        <td
+                                          colSpan={6}
+                                          style={{
+                                            textAlign: "center",
+                                            opacity: 0.7,
+                                          }}
+                                        >
                                           keine Einträge
                                         </td>
                                       </tr>
@@ -676,10 +754,17 @@ export default function ClientsPanel(): React.JSX.Element {
                                         <td>
                                           <select
                                             value={m.med_code}
-                                            onChange={(e) => updMed(i, { med_code: e.target.value })}
+                                            onChange={(e) =>
+                                              updMed(i, {
+                                                med_code: e.target.value,
+                                              })
+                                            }
                                           >
                                             {medCatalog.map((mc) => (
-                                              <option key={mc.code} value={mc.code}>
+                                              <option
+                                                key={mc.code}
+                                                value={mc.code}
+                                              >
                                                 {mc.label}
                                               </option>
                                             ))}
@@ -690,7 +775,10 @@ export default function ClientsPanel(): React.JSX.Element {
                                             type="month"
                                             value={m.since_month ?? ""}
                                             onChange={(e) =>
-                                              updMed(i, { since_month: e.target.value || null })
+                                              updMed(i, {
+                                                since_month:
+                                                  e.target.value || null,
+                                              })
                                             }
                                           />
                                         </td>
@@ -698,12 +786,18 @@ export default function ClientsPanel(): React.JSX.Element {
                                           <input
                                             value={m.dosage_note ?? ""}
                                             onChange={(e) =>
-                                              updMed(i, { dosage_note: e.target.value || null })
+                                              updMed(i, {
+                                                dosage_note:
+                                                  e.target.value || null,
+                                              })
                                             }
                                           />
                                         </td>
                                         <td>
-                                          <button type="button" onClick={() => delMed(i)}>
+                                          <button
+                                            type="button"
+                                            onClick={() => delMed(i)}
+                                          >
                                             🗑
                                           </button>
                                         </td>
@@ -711,7 +805,13 @@ export default function ClientsPanel(): React.JSX.Element {
                                     ))}
                                     {medications.length === 0 && (
                                       <tr>
-                                        <td colSpan={4} style={{ textAlign: "center", opacity: 0.7 }}>
+                                        <td
+                                          colSpan={4}
+                                          style={{
+                                            textAlign: "center",
+                                            opacity: 0.7,
+                                          }}
+                                        >
                                           keine Einträge
                                         </td>
                                       </tr>
@@ -724,10 +824,16 @@ export default function ClientsPanel(): React.JSX.Element {
                               </button>
 
                               <div className="n4-row" style={{ marginTop: 12 }}>
-                                <button onClick={() => void saveAnamnesis()} disabled={busy}>
+                                <button
+                                  onClick={() => void saveAnamnesis()}
+                                  disabled={busy}
+                                >
                                   Anamnese speichern
                                 </button>
-                                <button onClick={() => void deleteAnamnesis()} disabled={busy}>
+                                <button
+                                  onClick={() => void deleteAnamnesis()}
+                                  disabled={busy}
+                                >
                                   Anamnese löschen
                                 </button>
                               </div>

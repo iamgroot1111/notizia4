@@ -38,6 +38,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("clients");
 
   useEffect(() => {
+    console.log("Ich laufe nur, wenn sich 'hasAuth' ändert");
+    console.log("hasAuth =", hasAuth);
     if (!hasAuth) return;
     let cancelled = false;
     (async () => {
@@ -52,6 +54,10 @@ export default function App() {
       cancelled = true;
     };
   }, [hasAuth, win]);
+
+  useEffect(() => {
+    console.log("Ich laufe immer");
+  }, []);
 
   // 1) Erstabfrage läuft
   if (hasAuth && me === undefined) {
