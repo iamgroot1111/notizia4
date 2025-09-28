@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import AppHeader from "./components/AppHeader";
 import ClientsPanel from "./components/ClientsPanel";
-import SessionsPanel from "./components/SessionsPanel";
+import SessionsPanel from "./components/SessionsPanel";   
 import ReportsPanel from "./components/ReportsPanel";
 import LoginPanel from "./components/LoginPanel";
 import ChangePasswordDialog from "./components/ChangePasswordDialog";
@@ -38,6 +38,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("clients");
 
   useEffect(() => {
+    console.log("Ich laufe nur, wenn sich 'hasAuth' ändert");
+    console.log("hasAuth =", hasAuth);
     if (!hasAuth) return;
     let cancelled = false;
     (async () => {
@@ -52,6 +54,10 @@ export default function App() {
       cancelled = true;
     };
   }, [hasAuth, win]);
+
+  useEffect(() => {
+    console.log("Ich laufe immer");
+  }, []);
 
   // 1) Erstabfrage läuft
   if (hasAuth && me === undefined) {
