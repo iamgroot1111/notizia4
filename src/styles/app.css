@@ -1,38 +1,301 @@
 :root {
-  --gap: 12px;
-  --radius: 10px;
-  --border: 1px solid rgba(0,0,0,.1);
+  /* Palette – Pastellgrün */
+  --mint-50: #f6fbf7;
+  --mint-100: #e8f5ec;
+  --mint-150: #dcf0e3;
+  --mint-200: #cfe9d9;
+  --mint-300: #b8dcc7; /* leichte Akzente */
+  --mint-400: #8fc9aa;
+
+  --bg: var(--mint-50);
+  --card: #ffffff;
+  --card-alt: var(--mint-100);
+  --border: var(--mint-200);
+  --text: #102a24; /* sehr dunkles Grün für Kontrast */
+  --muted: #4b6b61;
+  --accent: #1f7a56; /* Buttons/Links */
+  --accent-contrast: #ffffff;
+
+  --radius: 12px;
+  --shadow: 0 10px 30px rgba(16, 42, 36, 0.06);
+  --control-h: 44px;
 }
 
-body { font-family: system-ui, Segoe UI, Roboto, sans-serif; margin: 0; }
-.n4-page { max-width: 1100px; margin: 0 auto; padding: 12px 16px 40px; }
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+.n4-page {
+  padding: 16px;
+}
 
-.n4-panel { margin-top: 14px; }
-.n4-form label, .n4-row label { font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
-.n4-row { display: flex; gap: var(--gap); align-items: end; flex-wrap: wrap; }
-.n4-block { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
-
-input, select, textarea {
-  border: var(--border);
+.n4-card {
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 8px 10px;
-  font-size: 14px;
+  box-shadow: var(--shadow);
+  padding: 16px;
 }
-button {
-  border: var(--border);
-  border-radius: 20px;
-  padding: 8px 14px;
-  background: #fff;
+
+/* Karten leichter voneinander abheben */
+.n4-card + .n4-card {
+  margin-top: 12px;
+}
+
+/* Alternierende Flächen */
+.n4-section-alt {
+  background: var(--card-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Buttons – groß & bedienbar */
+button,
+.n4-btn {
+  min-height: var(--control-h);
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
   cursor: pointer;
 }
-button:disabled { opacity: .5; cursor: default; }
-.n4-error { color: #b10028; }
+.n4-primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
+}
 
-.n4-table-wrap { border: var(--border); border-radius: var(--radius); overflow: auto; }
-.n4-table { width: 100%; border-collapse: collapse; }
-.n4-table th, .n4-table td { padding: 8px 10px; border-bottom: 1px solid rgba(0,0,0,.06); text-align: left; }
+/* Fokus sichtbar (A11y) */
+:focus-visible {
+  outline: 2px solid var(--mint-300);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
 
-.n4-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 1000px) { .n4-grid { grid-template-columns: 1fr; } }
+/* Nav – Tabs */
+.n4-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+nav.n4-row button[aria-pressed="true"],
+nav.n4-row a[aria-current="page"] {
+  background: var(--mint-200);
+  border-color: var(--mint-300);
+}
 
-.n4-card { padding: 12px; border: var(--border); border-radius: var(--radius); }
+/* Formulare */
+.n4-form label {
+  display: block;
+  margin: 10px 0;
+  font-weight: 500;
+}
+.n4-form input,
+.n4-form select,
+.n4-form textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: var(--radius); /* ÄNDERUNG: überall gleiche Rundung */
+  padding: 10px 12px;
+  min-height: var(--control-h);
+  box-sizing: border-box;
+  font: inherit;
+  color: inherit;
+}
+/* Einheitliches Select (manche Browser haben eckige Defaults) */
+.n4-form select {
+  appearance: none;
+  background-image: none;
+} /* NEU */
+
+/* Formular-Row: Felder nebeneinander (responsiv) */
+.n4-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+} /* bereits oben */
+.n4-row > label {
+  flex: 1 1 240px;
+} /* NEU: min 240 px pro Feld */
+/* Meldungen */
+.n4-error {
+  color: #b00020;
+}
+.n4-success {
+  color: #0a7a2e;
+}
+
+/* Skip-Link (A11y) */
+.skip-link {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.skip-link:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 6px 10px;
+  background: var(--mint-200);
+}
+
+/* Tabelle – dünne Linien + abgerundet */
+.n4-table-wrap {
+  overflow-x: auto;
+}
+.n4-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.n4-table thead th {
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.n4-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border); /* dünne Linien */
+}
+.n4-table tr:nth-child(even) td {
+  background: var(--mint-100); /* zarte Alternierung */
+}
+/* Abgerundete Zeilenenden */
+.n4-table tr > *:first-child {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+.n4-table tr > *:last-child {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+/* Skip-Link (A11y) */
+.skip-link {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.skip-link:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 6px 10px;
+  background: var(--mint-200);
+}
+
+/* Reduzierte Animation */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Responsive – Karten-Grid */
+  @media (min-width: 640px) {
+    .n4-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+  }
+  @media (min-width: 960px) {
+    :root {
+      --control-h: 38px;
+    }
+    .n4-row--2 > label {
+      flex: 1 1 calc(50% - 12px);
+    } /* 2 Spalten */
+    .n4-row--3 > label {
+      flex: 1 1 calc(33.333% - 12px);
+    } /* 3 Spalten */
+  }
+
+  .n4-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+
+/* Bevorzugt reduzierte Animation */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+/* --- Labels & Eingabefelder: Abstand zwischen Text und Feld ----------------- */
+.n4-form label { 
+  display: block; 
+  margin: 12px 0; 
+  font-weight: 600; 
+  line-height: 1.25;            /* sorgt dafür, dass nichts "abschneidet" */
+}
+
+/* Abstand zwischen Label-Text und dem eigentlichen Control */
+.n4-form label > input,
+.n4-form label > select,
+.n4-form label > textarea,
+.n4-form label > .n4-input-row {   /* falls du eine Wrapper-Zeile verwendest (z.B. mit dem Auge) */
+  margin-top: 6px;
+}
+
+/* Einheitliche Rundungen (global) */
+input, select, textarea, button {
+  border-radius: var(--radius);
+}
+
+/* Login-Button & allgemeine Form-Actions: Luft nach oben */
+.n4-form .n4-primary { 
+  margin-top: 12px; 
+  width: 100%;
+}
+
+/* Zeile mit Input + Icon (Auge) */
+.n4-input-row { 
+  display: flex; 
+  gap: 8px; 
+  align-items: stretch;
+}
+.n4-input-row input { flex: 1 1 auto; }
+.n4-input-row button { min-width: 44px; border-radius: 999px; }
+
+/* Formular-Reihen nebeneinander (responsiv, kein "Übereinander") */
+.n4-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.n4-row > label { flex: 1 1 240px; }               /* min 240px pro Feld */
+@media (min-width: 960px) {
+  .n4-row--2 > label { flex: 1 1 calc(50% - 12px); }
+  .n4-row--3 > label { flex: 1 1 calc(33.333% - 12px); }
+}
+
+/* Tabellen: dünne Linien, alternierende Zeilen, abgerundete "Zeilenkapseln" */
+.n4-table-wrap { overflow-x: auto; }
+.n4-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.n4-table thead th {
+  text-align: left;
+  position: sticky; top: 0; z-index: 1;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+}
+.n4-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.n4-table tr:nth-child(even) td {
+  background: var(--mint-100); /* zarte Alternierung */
+}
+.n4-table tr > *:first-child { border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
+.n4-table tr > *:last-child  { border-top-right-radius: 10px; border-bottom-right-radius: 10px; }

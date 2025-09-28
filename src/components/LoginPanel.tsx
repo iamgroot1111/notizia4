@@ -31,6 +31,7 @@ export default function LoginPanel({ onLoggedIn }: { onLoggedIn: () => void }) {
       <form
         onSubmit={submit}
         className="n4-card n4-form"
+        style={{ maxWidth: 520, margin: "0 auto" }}
         aria-labelledby="login-title"
       >
         <img

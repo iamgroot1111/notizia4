@@ -298,7 +298,7 @@ export default function ClientsPanel(): React.JSX.Element {
 
       {/* Anlegen */}
       <form onSubmit={createClient} className="n4-form" aria-label="Klient anlegen">
-        <div className="n4-row">
+        <div className="n4-row n4-row--2">
           <label style={{ flex: 2 }}>
             Voller Name
             <input
@@ -344,9 +344,9 @@ export default function ClientsPanel(): React.JSX.Element {
       </form>
 
       {/* Suche + Listen-Schalter */}
-      <div className="n4-row" style={{ marginTop: 8 }}>
+      <div className="n4-row n4-row--2" style={{ marginTop: 8 }}>
         <label style={{ flex: 1 }}>
-          Suchen
+          Suchen 
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
